@@ -34,13 +34,27 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          DOCKER_BUILDKIT=1 docker build -t ${{ steps.login-ecr.outputs.registry }}/medusa:latest .
-          docker push ${{ steps.login-ecr.outputs.registry }}/medusa:latest
+          DOCKER_BUILDKIT=1 docker build -t ${{ steps.login-ecr.outputs.registry }}/medusa:${{ github.sha }} .
+          docker push ${{ steps.login-ecr.outputs.registry }}/medusa:${{ github.sha }}
 
-      # - name: Deploy to ECS
-      #   uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-      #   with:
-      #     task-definition: my-task-def.json
-      #     service: my-service
-      #     cluster: my-cluster
-      #     wait-for-service-stability: true
+      - name: Download task definition
+        env:
+          TASK_DEFINITION_NAME: ${{ secrets.TASK_DEFINITION_NAME }}
+        run: |
+          aws ecs describe-task-definition --task-definition $TASK_DEFINITION_NAME  --query taskDefinition > task-definition.json
+
+      - name: Create new revision for Task definition
+        id: task-def-scheduler
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ secrets.CONTAINER_NAME}}
+          image: "${{ steps.login-ecr.outputs.registry }}/medusa:${{ github.sha }}"
+
+      - name: Update Scheduler Service with new Task Definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def-scheduler.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
